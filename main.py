@@ -1,12 +1,13 @@
-# api/main.py
+# main.py
 import secrets
 from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict
 from datetime import datetime, timedelta
 
-from .models import APIResponse
-from .utils import GEN_DF, EM_DF
+# ✅ FIXED IMPORTS — remove the leading dots
+from models import APIResponse
+from utils import GEN_DF, EM_DF
 
 # -----------------------------------
 # FastAPI app
@@ -33,6 +34,7 @@ app.add_middleware(
 API_KEYS: Dict[str, datetime] = {}
 KEY_EXPIRATION_MINUTES = 30  # each key is valid for 30 minutes
 
+
 @app.get("/api/generate-key", tags=["Authentication"])
 def generate_key():
     """
@@ -42,6 +44,7 @@ def generate_key():
     expires_at = datetime.utcnow() + timedelta(minutes=KEY_EXPIRATION_MINUTES)
     API_KEYS[new_key] = expires_at
     return {"api_key": new_key, "expires_at": expires_at.isoformat() + "Z"}
+
 
 # -----------------------------------
 # Dependency to verify API key
@@ -55,6 +58,7 @@ def verify_api_key(x_api_key: str = Header(...)):
 
     if x_api_key not in API_KEYS:
         raise HTTPException(status_code=401, detail="Invalid or expired API Key")
+
 
 # -----------------------------------
 # Prepare county data dynamically
@@ -75,6 +79,7 @@ if 'county' in GEN_DF.columns:
             "renewable_share": 50.0,  # placeholder
             "by_source": by_source
         }
+
 
 # -----------------------------------
 # Endpoints
