@@ -2,25 +2,63 @@
 import secrets
 from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Dict, Optional
+from typing import Dict
 from datetime import datetime, timedelta
 
 from models import APIResponse
 from utils import GEN_DF, EM_DF
 
 # -----------------------------------
-# FastAPI app
+# TAG METADATA (THIS FIXES VISIBILITY)
+# -----------------------------------
+tags_metadata = [
+    {
+        "name": "Overview",
+        "description": (
+            "National Energy Insights System (NEIS) is an API-first platform for "
+            "analyzing Kenya’s national and county-level energy generation and "
+            "carbon emissions. The system supports automatic estimation, "
+            "manual overrides, and audit flags for transparent reporting."
+        ),
+    },
+    {
+        "name": "National Data",
+        "description": (
+            "Provides national-level energy generation and emissions summaries. "
+            "Emissions calculations are controlled by a frontend checkbox."
+        ),
+    },
+    {
+        "name": "County Data",
+        "description": (
+            "County-level energy insights. Emissions are conditionally calculated "
+            "based on user selection and may be manually overridden."
+        ),
+    },
+    {
+        "name": "Manual Input",
+        "description": (
+            "Endpoints allowing users to manually override calculated emissions. "
+            "Overrides are tracked using audit flags."
+        ),
+    },
+    {
+        "name": "Authentication",
+        "description": "Generate and validate time-limited API keys."
+    },
+]
+
+# -----------------------------------
+# FASTAPI APP
 # -----------------------------------
 app = FastAPI(
     title="⚡ National Energy Insights System (NEIS)",
     description=(
-        "NEIS is a data-driven platform for monitoring, estimating, and auditing "
-        "energy generation and carbon emissions across Kenya at national and "
-        "county levels. The system supports automated emissions estimation, "
-        "manual data overrides, and transparent audit tracking for research, "
-        "policy analysis, and climate reporting."
+        "A transparent, auditable system for national and county-level "
+        "energy and emissions intelligence in Kenya."
     ),
-    version="1.2.0",
+    version="1.2.1",
+    openapi_tags=tags_metadata,
     contact={"name": "Simon Wanyoike", "email": "symoprof83@gmail.com"}
 )
 
@@ -36,7 +74,7 @@ app.add_middleware(
 )
 
 # -----------------------------------
-# API Key Management
+# API KEY MANAGEMENT
 # -----------------------------------
 API_KEYS: Dict[str, datetime] = {}
 KEY_EXPIRATION_MINUTES = 30
@@ -64,59 +102,53 @@ def verify_api_key(x_api_key: str = Header(...)):
 
 
 # -----------------------------------
-# HOME / OVERVIEW
+# OVERVIEW (VISIBLE AT / AND /DOCS)
 # -----------------------------------
 @app.get("/", tags=["Overview"])
 def overview():
     return {
         "system": "National Energy Insights System (NEIS)",
-        "overview": (
-            "NEIS integrates national datasets with user-supplied inputs to "
-            "deliver transparent energy and emissions intelligence. "
+        "description": (
+            "NEIS integrates national datasets with user-entered inputs to deliver "
+            "transparent energy generation and carbon emissions intelligence. "
             "Users can enable or disable automatic emissions estimation, "
-            "manually override values, and trace the origin of reported figures "
-            "through built-in audit flags."
+            "manually override values, and audit the origin of reported figures."
         ),
-        "capabilities": [
-            "National & county-level energy insights",
+        "features": [
             "Automatic emissions estimation",
             "Manual emissions override",
-            "Audit flags for data transparency",
-            "API-first architecture for dashboards & research tools"
+            "County & national insights",
+            "Audit flags for transparency",
+            "API-first design"
         ],
         "documentation": "/docs"
     }
 
 
 # -----------------------------------
-# In-memory manual override store
-# (replace with DB later)
+# IN-MEMORY MANUAL OVERRIDES
 # -----------------------------------
 MANUAL_EMISSIONS_OVERRIDE: Dict[str, float] = {}
 
 # -----------------------------------
-# Prepare generation-only county data
+# COUNTY GENERATION DATA (NO EMISSIONS)
 # -----------------------------------
 counties_data = {}
 
 if "county" in GEN_DF.columns:
     for county in GEN_DF["county"].dropna().unique():
-        gen_total = float(
-            GEN_DF[GEN_DF["county"] == county]["generation_mwh"].sum()
-        )
-
-        by_source = []
-        if "source" in GEN_DF.columns:
-            for source, grp in GEN_DF[GEN_DF["county"] == county].groupby("source"):
-                by_source.append({
-                    "source": source,
-                    "generation_MWh": float(grp["generation_mwh"].sum())
-                })
-
         counties_data[county] = {
             "county": county,
-            "total_generation": gen_total,
-            "by_source": by_source
+            "total_generation": float(
+                GEN_DF[GEN_DF["county"] == county]["generation_mwh"].sum()
+            ),
+            "by_source": [
+                {
+                    "source": src,
+                    "generation_MWh": float(grp["generation_mwh"].sum())
+                }
+                for src, grp in GEN_DF[GEN_DF["county"] == county].groupby("source")
+            ] if "source" in GEN_DF.columns else []
         }
 
 
@@ -129,45 +161,33 @@ if "county" in GEN_DF.columns:
     tags=["National Data"],
     dependencies=[Depends(verify_api_key)]
 )
-def national_summary(
-    estimate_emissions: bool = True,
-    use_manual_override: bool = True
-):
-    """
-    estimate_emissions:
-        Linked directly to frontend checkbox.
-    use_manual_override:
-        Allows user-entered emissions to override calculations.
-    """
+def national_summary(estimate_emissions: bool = True, use_manual_override: bool = True):
 
     if not estimate_emissions:
-        total_emissions = 0.0
+        emissions = 0.0
         source = "disabled"
 
     elif use_manual_override and "national" in MANUAL_EMISSIONS_OVERRIDE:
-        total_emissions = MANUAL_EMISSIONS_OVERRIDE["national"]
+        emissions = MANUAL_EMISSIONS_OVERRIDE["national"]
         source = "user_entered"
 
     else:
-        total_emissions = (
-            float(EM_DF["emissions_tCO2"].sum())
-            if "emissions_tCO2" in EM_DF.columns
-            else 0.0
-        )
+        emissions = float(EM_DF["emissions_tCO2"].sum()) if "emissions_tCO2" in EM_DF.columns else 0.0
         source = "calculated"
 
-    data = {
-        "total_generation": float(GEN_DF["generation_mwh"].sum()),
-        "total_emissions": total_emissions,
-        "emissions_source": source,
-        "renewable_share": 65.5
+    return {
+        "status": "success",
+        "data": {
+            "total_generation": float(GEN_DF["generation_mwh"].sum()),
+            "total_emissions": emissions,
+            "emissions_source": source,
+            "renewable_share": 65.5
+        }
     }
-
-    return {"status": "success", "data": data}
 
 
 # -----------------------------------
-# COUNTY INSIGHTS (BUG FIXED HERE)
+# COUNTY INSIGHTS (FIXED)
 # -----------------------------------
 @app.get(
     "/api/energy/county/{name}",
@@ -175,11 +195,8 @@ def national_summary(
     tags=["County Data"],
     dependencies=[Depends(verify_api_key)]
 )
-def county_insights(
-    name: str,
-    estimate_emissions: bool = True,
-    use_manual_override: bool = True
-):
+def county_insights(name: str, estimate_emissions: bool = True, use_manual_override: bool = True):
+
     county = counties_data.get(name)
     if not county:
         raise HTTPException(status_code=404, detail="County not found")
@@ -198,63 +215,31 @@ def county_insights(
         ) if "emissions_tCO2" in EM_DF.columns else 0.0
         source = "calculated"
 
-    result = {
-        **county,
-        "total_emissions": emissions,
-        "emissions_source": source
+    return {
+        "status": "success",
+        "data": {
+            **county,
+            "total_emissions": emissions,
+            "emissions_source": source
+        }
     }
-
-    return {"status": "success", "data": result}
 
 
 # -----------------------------------
-# MANUAL EMISSIONS OVERRIDE ENDPOINT
+# MANUAL EMISSIONS OVERRIDE
 # -----------------------------------
 @app.post(
     "/api/energy/manual-emissions",
     tags=["Manual Input"],
     dependencies=[Depends(verify_api_key)]
 )
-def set_manual_emissions(
-    scope: str,
-    value: float
-):
-    """
-    scope:
-        'national' or county name (e.g. Nairobi)
-    value:
-        Emissions in tCO2 entered by user
-    """
-
+def set_manual_emissions(scope: str, value: float):
     if value < 0:
-        raise HTTPException(status_code=400, detail="Value must be >= 0")
+        raise HTTPException(status_code=400, detail="Value must be non-negative")
 
     MANUAL_EMISSIONS_OVERRIDE[scope] = value
-
     return {
         "status": "success",
-        "message": f"Manual emissions override set for {scope}",
+        "scope": scope,
         "value": value
-    }
-
-
-# -----------------------------------
-# EXAMPLES
-# -----------------------------------
-@app.get("/api/energy/examples", tags=["Examples"])
-def examples():
-    return {
-        "checkbox_linking": {
-            "enabled": "/api/energy/summary?estimate_emissions=true",
-            "disabled": "/api/energy/summary?estimate_emissions=false"
-        },
-        "manual_override": {
-            "set_national": "POST /api/energy/manual-emissions?scope=national&value=123.4",
-            "set_county": "POST /api/energy/manual-emissions?scope=Nairobi&value=56.7"
-        },
-        "audit_flags": [
-            "calculated",
-            "user_entered",
-            "disabled"
-        ]
     }
